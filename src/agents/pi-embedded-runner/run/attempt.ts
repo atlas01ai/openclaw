@@ -13,6 +13,11 @@ import type { OpenClawConfig } from "../../../config/config.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { ensureGlobalUndiciStreamTimeouts } from "../../../infra/net/undici-global-dispatcher.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
+import {
+  formatRetrievedMemories,
+  resolveAutoRetrievalConfig,
+  retrieveRelevantMemories,
+} from "../../../memory/auto-retrieval.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import type {
   PluginHookAgentContext,
@@ -995,6 +1000,26 @@ export async function runEmbeddedAttempt(
     const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
     const ownerDisplay = resolveOwnerDisplaySetting(params.config);
 
+    // Auto-retrieve relevant memories for the current message
+    let autoRetrievedMemory: string | undefined;
+    if (params.config && promptMode === "full") {
+      const autoRetrievalConfig = resolveAutoRetrievalConfig(params.config, sessionAgentId);
+      if (autoRetrievalConfig?.enabled) {
+        try {
+          const retrieval = await retrieveRelevantMemories({
+            cfg: params.config,
+            agentId: sessionAgentId,
+            message: params.prompt,
+            sessionKey: params.sessionKey,
+          });
+          autoRetrievedMemory = formatRetrievedMemories(retrieval) ?? undefined;
+        } catch (err) {
+          // Graceful degradation: continue without auto-retrieved memories
+          log.debug(`auto-retrieval failed: ${describeUnknownError(err)}`);
+        }
+      }
+    }
+
     const appendPrompt = buildEmbeddedSystemPrompt({
       workspaceDir: effectiveWorkspace,
       defaultThinkLevel: params.thinkLevel,
@@ -1025,6 +1050,7 @@ export async function runEmbeddedAttempt(
       contextFiles,
       bootstrapTruncationWarningLines: bootstrapPromptWarning.lines,
       memoryCitationsMode: params.config?.memory?.citations,
+      autoRetrievedMemory,
     });
     const systemPromptReport = buildSystemPromptReport({
       source: "run",
