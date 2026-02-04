@@ -13,6 +13,22 @@ import { formatErrorMessage } from "../../../infra/errors.js";
 import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summary.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
+import {
+  isOllamaCompatProvider,
+  resolveOllamaCompatNumCtxEnabled,
+  shouldInjectOllamaCompatNumCtx,
+  wrapOllamaCompatNumCtx,
+} from "../../../plugin-sdk/ollama.js";
+import { resolveSignalReactionLevel } from "../../../plugin-sdk/signal.js";
+import {
+  resolveTelegramInlineButtonsScope,
+  resolveTelegramReactionLevel,
+} from "../../../plugin-sdk/telegram-runtime.js";
+import {
+  formatRetrievedMemories,
+  resolveAutoRetrievalConfig,
+  retrieveRelevantMemories,
+} from "../../../memory/auto-retrieval.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { resolveToolCallArgumentsEncoding } from "../../../plugins/provider-model-compat.js";
 import {
@@ -857,6 +873,26 @@ export async function runEmbeddedAttempt(
       },
     });
 
+    // Auto-retrieve relevant memories for the current message
+    let autoRetrievedMemory: string | undefined;
+    if (params.config && effectivePromptMode === "full") {
+      const autoRetrievalConfig = resolveAutoRetrievalConfig(params.config, sessionAgentId);
+      if (autoRetrievalConfig?.enabled) {
+        try {
+          const retrieval = await retrieveRelevantMemories({
+            cfg: params.config,
+            agentId: sessionAgentId,
+            message: params.prompt,
+            sessionKey: params.sessionKey,
+          });
+          autoRetrievedMemory = formatRetrievedMemories(retrieval) ?? undefined;
+        } catch (err) {
+          // Graceful degradation: continue without auto-retrieved memories
+          log.debug(`auto-retrieval failed: ${describeUnknownError(err)}`);
+        }
+      }
+    }
+
     const builtAppendPrompt =
       resolveSystemPromptOverride({
         config: params.config,
@@ -891,6 +927,7 @@ export async function runEmbeddedAttempt(
         includeMemorySection: !params.contextEngine || params.contextEngine.info.id === "legacy",
         memoryCitationsMode: params.config?.memory?.citations,
         promptContribution,
+        autoRetrievedMemory,
       });
     const appendPrompt = transformProviderSystemPrompt({
       provider: params.provider,
