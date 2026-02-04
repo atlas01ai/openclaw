@@ -5,6 +5,14 @@
  * context into the system prompt before each agent turn.
  *
  * The goal: Memory should come to me, not just be available if I look.
+ *
+ * IMPORTANT NOTES:
+ * - Must be explicitly enabled via config (agents.defaults.memorySearch.autoRetrieval.enabled)
+ * - Adds latency: one embedding API call per user message
+ * - Adds tokens: up to maxTokens (default 800) per turn
+ * - No deduplication with contextFiles: if MEMORY.md is also loaded as a context file,
+ *   content may appear twice. Consider excluding MEMORY.md from contextFiles when
+ *   auto-retrieval is enabled, or accept some redundancy.
  */
 
 import type { OpenClawConfig } from "../config/config.js";
@@ -29,7 +37,7 @@ export interface AutoRetrievalResult {
 }
 
 const DEFAULT_CONFIG: AutoRetrievalConfig = {
-  enabled: true,
+  enabled: false, // Must be explicitly enabled
   maxTokens: 800,
   maxResults: 5,
   minScore: 0.25,
@@ -87,6 +95,7 @@ function shouldSkipRetrieval(message: string): string | null {
 
 /**
  * Resolve auto-retrieval config from OpenClaw config.
+ * Returns null unless explicitly enabled via config.
  */
 export function resolveAutoRetrievalConfig(
   cfg: OpenClawConfig | undefined,
@@ -111,15 +120,16 @@ export function resolveAutoRetrievalConfig(
   const autoRetrieval =
     agentConfig?.memorySearch?.autoRetrieval ?? defaults?.memorySearch?.autoRetrieval;
 
-  if (autoRetrieval?.enabled === false) {
+  // Auto-retrieval must be EXPLICITLY enabled - not enabled by default
+  if (!autoRetrieval?.enabled) {
     return null;
   }
 
   return {
-    enabled: autoRetrieval?.enabled ?? DEFAULT_CONFIG.enabled,
-    maxTokens: autoRetrieval?.maxTokens ?? DEFAULT_CONFIG.maxTokens,
-    maxResults: autoRetrieval?.maxResults ?? DEFAULT_CONFIG.maxResults,
-    minScore: autoRetrieval?.minScore ?? DEFAULT_CONFIG.minScore,
+    enabled: true, // We know it's enabled if we got here
+    maxTokens: autoRetrieval.maxTokens ?? DEFAULT_CONFIG.maxTokens,
+    maxResults: autoRetrieval.maxResults ?? DEFAULT_CONFIG.maxResults,
+    minScore: autoRetrieval.minScore ?? DEFAULT_CONFIG.minScore,
   };
 }
 
