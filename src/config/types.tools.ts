@@ -415,6 +415,17 @@ export type MemorySearchConfig = {
     /** Optional cap on cached embeddings (best-effort). */
     maxEntries?: number;
   };
+  /** Auto-retrieval configuration: automatically inject relevant memories into system prompt. */
+  autoRetrieval?: {
+    /** Enable auto-retrieval (default: false until explicitly enabled). */
+    enabled?: boolean;
+    /** Maximum tokens for auto-retrieved context (default: 800). */
+    maxTokens?: number;
+    /** Maximum number of snippets to include (default: 5). */
+    maxResults?: number;
+    /** Minimum similarity score for inclusion (default: 0.25). */
+    minScore?: number;
+  };
 };
 
 export type ToolsConfig = {
