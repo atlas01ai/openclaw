@@ -231,6 +231,8 @@ export function buildAgentSystemPrompt(params: {
     channel: string;
   };
   memoryCitationsMode?: MemoryCitationsMode;
+  /** Auto-retrieved memories to inject before Project Context. */
+  autoRetrievedMemory?: string;
 }) {
   const acpEnabled = params.acpEnabled !== false;
   const sandboxedRuntime = params.sandboxInfo?.enabled === true;
@@ -606,6 +608,11 @@ export function buildAgentSystemPrompt(params: {
   }
   if (reasoningHint) {
     lines.push("## Reasoning Format", reasoningHint, "");
+  }
+
+  // Inject auto-retrieved memories before Project Context
+  if (params.autoRetrievedMemory?.trim()) {
+    lines.push(params.autoRetrievedMemory.trim(), "");
   }
 
   const contextFiles = params.contextFiles ?? [];
