@@ -125,11 +125,22 @@ export function resolveAutoRetrievalConfig(
     return null;
   }
 
+  // Validate and clamp config values to safe ranges
+  const maxTokens = Math.max(
+    100,
+    Math.min(2000, autoRetrieval.maxTokens ?? DEFAULT_CONFIG.maxTokens),
+  );
+  const maxResults = Math.max(
+    1,
+    Math.min(10, autoRetrieval.maxResults ?? DEFAULT_CONFIG.maxResults),
+  );
+  const minScore = Math.max(0, Math.min(1, autoRetrieval.minScore ?? DEFAULT_CONFIG.minScore));
+
   return {
     enabled: true, // We know it's enabled if we got here
-    maxTokens: autoRetrieval.maxTokens ?? DEFAULT_CONFIG.maxTokens,
-    maxResults: autoRetrieval.maxResults ?? DEFAULT_CONFIG.maxResults,
-    minScore: autoRetrieval.minScore ?? DEFAULT_CONFIG.minScore,
+    maxTokens,
+    maxResults,
+    minScore,
   };
 }
 
