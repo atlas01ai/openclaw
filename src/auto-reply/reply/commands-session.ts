@@ -1,9 +1,15 @@
 import type { SessionEntry } from "../../config/sessions.js";
 import type { CommandHandler } from "./commands-types.js";
+import { resolveAgentDir } from "../../agents/agent-scope.js";
 import { abortEmbeddedPiRun } from "../../agents/pi-embedded.js";
 import { updateSessionStore } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
 import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
+import {
+  formatUsageReportLines,
+  loadProviderUsageSummary,
+  resolveUsageProviderId,
+} from "../../infra/provider-usage.js";
 import { scheduleGatewaySigusr1Restart, triggerOpenClawRestart } from "../../infra/restart.js";
 import { loadCostUsageSummary, loadSessionCostSummary } from "../../infra/session-cost-usage.js";
 import { formatTokenCount, formatUsd } from "../../utils/usage-format.js";
@@ -161,6 +167,32 @@ export const handleUsageCommand: CommandHandler = async (params, allowTextComman
 
   const rawArgs = normalized === "/usage" ? "" : normalized.slice("/usage".length).trim();
   const requested = rawArgs ? normalizeUsageDisplay(rawArgs) : undefined;
+
+  if (rawArgs.toLowerCase() === "quota") {
+    try {
+      const provider = resolveUsageProviderId(params.provider);
+      const agentDir = resolveAgentDir(params.cfg, params.sessionEntry?.agentId);
+      const summary = await loadProviderUsageSummary({
+        timeoutMs: 3500,
+        providers: [provider],
+        agentDir,
+      });
+
+      const lines = formatUsageReportLines(summary, { now: Date.now() });
+      return {
+        shouldContinue: false,
+        reply: { text: `📊 ${lines.join("\n")}` },
+      };
+    } catch (error) {
+      return {
+        shouldContinue: false,
+        reply: {
+          text: `⚠️ Failed to fetch quota: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      };
+    }
+  }
+
   if (rawArgs.toLowerCase().startsWith("cost")) {
     const sessionSummary = await loadSessionCostSummary({
       sessionId: params.sessionEntry?.sessionId,
@@ -203,7 +235,7 @@ export const handleUsageCommand: CommandHandler = async (params, allowTextComman
   if (rawArgs && !requested) {
     return {
       shouldContinue: false,
-      reply: { text: "⚙️ Usage: /usage off|tokens|full|cost" },
+      reply: { text: "⚙️ Usage: /usage off|tokens|full|cost|quota" },
     };
   }
 
