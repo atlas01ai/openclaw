@@ -171,7 +171,13 @@ export const handleUsageCommand: CommandHandler = async (params, allowTextComman
   if (rawArgs.toLowerCase() === "quota") {
     try {
       const provider = resolveUsageProviderId(params.provider);
-      const agentDir = resolveAgentDir(params.cfg, params.sessionEntry?.agentId);
+      if (!provider) {
+        return {
+          shouldContinue: false,
+          reply: { text: "❌ Unable to determine usage provider from current model." },
+        };
+      }
+      const agentDir = params.agentId ? resolveAgentDir(params.cfg, params.agentId) : undefined;
       const summary = await loadProviderUsageSummary({
         timeoutMs: 3500,
         providers: [provider],
