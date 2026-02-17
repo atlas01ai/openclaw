@@ -199,6 +199,11 @@ export async function launchOpenClawChrome(
       "--disable-session-crashed-bubble",
       "--hide-crash-restore-bubble",
       "--password-store=basic",
+      // LEAK FIX: Prevent session restore from spawning dozens of renderer
+      // processes from previous sessions (seen: 1500+ URLs in session file
+      // → 79 renderers on every startup → system crash)
+      "--restore-last-session=false",
+      "--disable-restore-background-contents",
     ];
 
     if (resolved.headless) {
