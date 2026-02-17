@@ -764,6 +764,9 @@ export async function createPageViaPlaywright(opts: {
 /**
  * Close a page/tab by targetId using the persistent Playwright connection.
  * Used for remote profiles where HTTP-based /json/close is ephemeral.
+ *
+ * LEAK FIX: Also closes the context if this was the last page, preventing
+ * renderer process accumulation.
  */
 export async function closePageByTargetIdViaPlaywright(opts: {
   cdpUrl: string;
@@ -774,7 +777,20 @@ export async function closePageByTargetIdViaPlaywright(opts: {
   if (!page) {
     throw new Error("tab not found");
   }
+
+  // Track the context before closing the page
+  const context = page.context();
   await page.close();
+
+  // CRITICAL: Close context if empty to free renderer processes
+  // This prevents the leak that caused 76 renderer processes (3.5GB)
+  const remainingPages = context.pages();
+  if (remainingPages.length === 0) {
+    await context.close().catch((err) => {
+      // Log but don't fail - context cleanup is best-effort
+      console.error("Failed to close empty browser context:", err);
+    });
+  }
 }
 
 /**
