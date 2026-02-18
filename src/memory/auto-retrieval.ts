@@ -105,7 +105,7 @@ export function resolveAutoRetrievalConfig(
     return null;
   }
 
-  const agentConfig = cfg.agents?.items?.[agentId];
+  const agentConfig = cfg.agents?.list?.find((a) => a.id === agentId);
   const defaults = cfg.agents?.defaults;
 
   // Check if memory search is enabled (required for auto-retrieval)
