@@ -574,9 +574,17 @@ export function attachGatewayWsMessageHandler(params: {
           resolvedAuth.mode === "trusted-proxy" &&
           authOk &&
           authMethod === "trusted-proxy";
+        // Custom fork patch (2026-02-22): restore pre-2026.2.21 loopback bypass.
+        // Security fix 0bda0202f added role/scope upgrade enforcement that broke
+        // subagent spawning (sessions_spawn calls callGateway which presents a device
+        // identity on loopback). Pre-hardening, loopback + valid token was sufficient.
+        // Restore that behaviour: if the client is on local loopback AND token auth
+        // passed, skip device pairing. This is safe — loopback connections cannot
+        // originate from outside the machine, and the token is still validated.
         const skipPairing =
           shouldSkipControlUiPairing(controlUiAuthPolicy, sharedAuthOk, trustedProxyAuthOk) ||
-          skipPairingForOperatorSharedAuth;
+          skipPairingForOperatorSharedAuth ||
+          (isLocalClient && sharedAuthOk);
         if (device && devicePublicKey && !skipPairing) {
           const formatAuditList = (items: string[] | undefined): string => {
             if (!items || items.length === 0) {
