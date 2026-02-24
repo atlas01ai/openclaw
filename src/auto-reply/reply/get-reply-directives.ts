@@ -390,10 +390,15 @@ export async function resolveReplyDirectives(params: {
   model = modelState.model;
 
   // When neither directive nor session set reasoning, default to model capability (e.g. OpenRouter with reasoning: true).
+  // Custom fork patch: exclude native Anthropic provider from auto-detection. Anthropic models manage extended
+  // thinking via thinkingDefault config (separate budget parameter). Auto-enabling visible reasoning output for
+  // Anthropic models causes thinking blocks to appear as "Reasoning:\n_..._" messages in Discord — unintended.
+  // OpenRouter-proxied reasoning models (the intended target, provider !== "anthropic") are unaffected.
   const reasoningExplicitlySet =
     directives.reasoningLevel !== undefined ||
     (sessionEntry?.reasoningLevel !== undefined && sessionEntry?.reasoningLevel !== null);
-  if (!reasoningExplicitlySet && resolvedReasoningLevel === "off") {
+  const isNativeAnthropic = provider === "anthropic";
+  if (!reasoningExplicitlySet && resolvedReasoningLevel === "off" && !isNativeAnthropic) {
     resolvedReasoningLevel = await modelState.resolveDefaultReasoningLevel();
   }
 
