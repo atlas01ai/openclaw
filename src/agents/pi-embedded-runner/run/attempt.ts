@@ -2376,7 +2376,14 @@ export async function runEmbeddedAttempt(
       // historical messages at attempt start, but the agent loop's internal tool call →
       // tool result cycles bypass that path. Wrap streamFn so every outbound request
       // sees sanitized tool call IDs.
-      if (transcriptPolicy.sanitizeToolCallIds && transcriptPolicy.toolCallIdMode) {
+      //
+      // Custom fork patch: restrict per-request streamFn sanitization to strict9 mode
+      // (Mistral) only. Applying it to Anthropic (strict mode) invalidates extended
+      // thinking block signatures — Anthropic signs over the full message content
+      // including tool call IDs. Changing toolu_XX → tooluXX on every request corrupts
+      // the signature, causing "thinking blocks cannot be modified" API rejections.
+      // The one-time sanitizeSessionHistory call at session load is unaffected.
+      if (transcriptPolicy.sanitizeToolCallIds && transcriptPolicy.toolCallIdMode === "strict9") {
         const inner = activeSession.agent.streamFn;
         const mode = transcriptPolicy.toolCallIdMode;
         activeSession.agent.streamFn = (model, context, options) => {
