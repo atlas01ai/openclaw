@@ -57,18 +57,119 @@ Send with media:
 
 Send with components v2 (recommended for rich UI):
 
+**⚠️ Block type names are strict.** The `type` field must be an exact supported value. Common mistake: `"type": "buttons"` does NOT exist — use `"type": "actions"` for button rows.
+
+### Supported block types
+
+| Type        | Purpose                   | Required fields                         |
+| ----------- | ------------------------- | --------------------------------------- |
+| `text`      | Plain text block          | `text`                                  |
+| `section`   | Text + optional accessory | `text` or `texts`, optional `accessory` |
+| `actions`   | Row of buttons or selects | `buttons` or `select`                   |
+| `media`     | Image/video gallery       | `items` (array of `{url}`)              |
+| `separator` | Visual divider            | (none)                                  |
+| `file`      | File attachment           | `file`                                  |
+
+### Buttons (action row)
+
 ```json
 {
   "action": "send",
   "channel": "discord",
   "to": "channel:123",
-  "message": "Status update",
-  "components": "[Carbon v2 components]"
+  "message": "Choose an option:",
+  "components": {
+    "blocks": [
+      {
+        "type": "actions",
+        "buttons": [
+          { "label": "✅ Approve", "style": "success" },
+          { "label": "❌ Reject", "style": "danger" },
+          { "label": "⏭️ Skip", "style": "secondary" }
+        ]
+      }
+    ],
+    "reusable": true
+  }
 }
 ```
 
-- `components` expects Carbon component instances (Container, TextDisplay, etc.) from JS/TS integrations.
-- Do not combine `components` with `embeds` (Discord rejects v2 + embeds).
+- Button `style`: `"primary"` (blurple), `"secondary"` (grey), `"success"` (green), `"danger"` (red), `"link"` (external URL, requires `url`)
+- Set `"reusable": true` at the components level to keep buttons active until expiry
+- Optional `"allowedUsers": ["user_id"]` on a button to restrict who can click
+
+### Rich text with container
+
+```json
+{
+  "action": "send",
+  "channel": "discord",
+  "to": "channel:123",
+  "components": {
+    "blocks": [
+      { "type": "text", "text": "## Title\n\nFormatted markdown content here." },
+      {
+        "type": "actions",
+        "buttons": [{ "label": "Click me", "style": "primary" }]
+      }
+    ],
+    "container": { "accentColor": "#5865F2" }
+  }
+}
+```
+
+### Select menu
+
+```json
+{
+  "action": "send",
+  "channel": "discord",
+  "to": "channel:123",
+  "components": {
+    "blocks": [
+      {
+        "type": "actions",
+        "select": {
+          "type": "string",
+          "placeholder": "Pick one...",
+          "options": [
+            { "label": "Option A", "value": "a" },
+            { "label": "Option B", "value": "b" }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+### Modal (form with trigger button)
+
+```json
+{
+  "action": "send",
+  "channel": "discord",
+  "to": "channel:123",
+  "components": {
+    "modal": {
+      "title": "Feedback",
+      "triggerLabel": "📝 Give Feedback",
+      "triggerStyle": "primary",
+      "fields": [
+        { "type": "text", "label": "What went well?", "style": "paragraph" },
+        { "type": "text", "label": "Rating", "style": "short", "placeholder": "1-5" }
+      ]
+    }
+  }
+}
+```
+
+### Common mistakes
+
+- ❌ `"type": "buttons"` → Does not exist. Use `"type": "actions"`.
+- ❌ `"type": "section"` with only `buttons` → Section requires `text` or `texts`.
+- ❌ Combining `components` with `embeds` → Discord rejects v2 + embeds together.
+- ❌ Using channel name as `target` → Use explicit `to: "channel:<id>"` with the numeric ID.
 
 Legacy embeds (not recommended):
 
