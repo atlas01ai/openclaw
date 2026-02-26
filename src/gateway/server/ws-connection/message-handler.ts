@@ -711,11 +711,13 @@ export function attachGatewayWsMessageHandler(params: {
           authOk,
           authMethod,
         });
-        const skipPairing = shouldSkipControlUiPairing(
-          controlUiAuthPolicy,
-          sharedAuthOk,
-          trustedProxyAuthOk,
-        );
+        // Custom fork patch (2026-02-22, retained v2026.2.25): restore pre-2026.2.21 loopback bypass.
+        // Security fix 0bda0202f broke subagent spawning (sessions_spawn presents device identity
+        // on loopback). Loopback + valid shared token is sufficient — cannot originate externally.
+        // Note: upstream shouldAllowSilentLocalPairing may cover this now; test dropping in next cycle.
+        const skipPairing =
+          shouldSkipControlUiPairing(controlUiAuthPolicy, sharedAuthOk, trustedProxyAuthOk) ||
+          (isLocalClient && sharedAuthOk);
         if (device && devicePublicKey && !skipPairing) {
           const formatAuditList = (items: string[] | undefined): string => {
             if (!items || items.length === 0) {
