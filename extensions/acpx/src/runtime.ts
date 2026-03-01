@@ -1,3 +1,6 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join as pathJoin } from "node:path";
 import { createInterface } from "node:readline";
 import type {
   AcpRuntimeCapabilities,
@@ -174,6 +177,36 @@ export class AcpxRuntime implements AcpRuntime {
     const backendSessionId = ensuredEvent
       ? asOptionalString(ensuredEvent.acpxSessionId)
       : undefined;
+
+    // Fix: acpx initializes record.sessionId = record.id (its own UUID, not a Claude session ID).
+    // When acpx later calls session/load with this UUID, the bridge returns -32603 Internal error
+    // ("Query closed before response received") instead of -32002 Resource not found, so the
+    // fallback to createSession never fires → ACP_TURN_FAILED on every first prompt.
+    // Fix: null out sessionId on fresh sessions so loadSessionCandidates returns [] and acpx
+    // skips loadSession entirely, going straight to createSession. After a successful first
+    // prompt, acpx updates the record with the real Claude session ID automatically.
+    if (acpxRecordId && !agentSessionId) {
+      try {
+        const sessionFile = pathJoin(
+          homedir(),
+          ".acpx",
+          "sessions",
+          `${encodeURIComponent(acpxRecordId)}.json`,
+        );
+        const raw = await readFile(sessionFile, "utf8");
+        const record = JSON.parse(raw) as Record<string, unknown>;
+        if (typeof record.id === "string" && record.sessionId === record.id) {
+          record.sessionId = ""; // empty string: passes parseSessionRecord type check, filtered by loadSessionCandidates
+          await writeFile(sessionFile, JSON.stringify(record), "utf8");
+          this.logger?.debug?.(
+            `acpx: cleared sessionId on fresh session ${acpxRecordId} to skip invalid loadSession`,
+          );
+        }
+      } catch {
+        // Non-critical: if this fails, the bridge will return -32603 and the session
+        // will fail on first prompt. The error is logged by acpx.
+      }
+    }
 
     return {
       sessionKey: input.sessionKey,
