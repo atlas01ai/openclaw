@@ -151,11 +151,15 @@ async function scanStatusJsonFast(opts: {
   all?: boolean;
 }): Promise<StatusScanResult> {
   const loadedRaw = loadConfig();
-  const { resolvedConfig: cfg } = await resolveCommandSecretRefsViaGateway({
+  // If gateway is unreachable and local env resolution fails, fall back to raw
+  // config so status still runs (secret values aren't rendered in status output).
+  const cfg = await resolveCommandSecretRefsViaGateway({
     config: loadedRaw,
     commandName: "status --json",
     targetIds: getStatusCommandSecretTargetIds(),
-  });
+  })
+    .then(({ resolvedConfig }) => resolvedConfig)
+    .catch(() => loadedRaw);
   const osSummary = resolveOsSummary();
   const tailscaleMode = cfg.gateway?.tailscale?.mode ?? "off";
   const updateTimeoutMs = opts.all ? 6500 : 2500;
@@ -241,11 +245,15 @@ export async function scanStatus(
     async (progress) => {
       progress.setLabel("Loading config…");
       const loadedRaw = loadConfig();
-      const { resolvedConfig: cfg } = await resolveCommandSecretRefsViaGateway({
+      // If gateway is unreachable and local env resolution fails, fall back to raw
+      // config so status still runs (secret values aren't rendered in status output).
+      const cfg = await resolveCommandSecretRefsViaGateway({
         config: loadedRaw,
         commandName: "status",
         targetIds: getStatusCommandSecretTargetIds(),
-      });
+      })
+        .then(({ resolvedConfig }) => resolvedConfig)
+        .catch(() => loadedRaw);
       const osSummary = resolveOsSummary();
       const tailscaleMode = cfg.gateway?.tailscale?.mode ?? "off";
       const tailscaleDnsPromise =
