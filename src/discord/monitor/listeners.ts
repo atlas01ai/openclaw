@@ -125,6 +125,12 @@ export function registerDiscordListener(listeners: Array<object>, listener: obje
 export class DiscordMessageListener extends MessageCreateListener {
   private readonly channelQueue = new KeyedAsyncQueue();
 
+  // Messages that have been queued but not yet started after this threshold are
+  // considered stale and are silently dropped. This prevents per-channel queues
+  // from backing up indefinitely during API quota failures: once the outage clears,
+  // the queue drains immediately rather than replaying minutes-old messages.
+  private static readonly QUEUE_STALENESS_MS = 120_000;
+
   constructor(
     private handler: DiscordMessageHandler,
     private logger?: Logger,
@@ -136,11 +142,22 @@ export class DiscordMessageListener extends MessageCreateListener {
   async handle(data: DiscordMessageEvent, client: Client) {
     this.onEvent?.();
     const channelId = data.channel_id;
+    const enqueuedAt = Date.now();
     // Serialize messages within the same channel to preserve ordering,
     // but allow different channels to proceed in parallel so that
     // channel-bound agents are not blocked by each other.
-    void this.channelQueue.enqueue(channelId, () =>
-      runDiscordListenerWithSlowLog({
+    void this.channelQueue.enqueue(channelId, () => {
+      const waitedMs = Date.now() - enqueuedAt;
+      if (waitedMs > DiscordMessageListener.QUEUE_STALENESS_MS) {
+        const logger = this.logger ?? discordEventQueueLog;
+        logger.warn("Dropping stale queued message", {
+          channelId,
+          waitedMs,
+          consoleMessage: `[discord] dropping stale message for channel ${channelId} (waited ${Math.round(waitedMs / 1000)}s in queue)`,
+        });
+        return Promise.resolve();
+      }
+      return runDiscordListenerWithSlowLog({
         logger: this.logger,
         listener: this.constructor.name,
         event: this.type,
@@ -149,8 +166,8 @@ export class DiscordMessageListener extends MessageCreateListener {
           const logger = this.logger ?? discordEventQueueLog;
           logger.error(danger(`discord handler failed: ${String(err)}`));
         },
-      }),
-    );
+      });
+    });
   }
 }
 

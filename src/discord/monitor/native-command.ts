@@ -836,78 +836,74 @@ async function handleDiscordModelPickerInteraction(
       return;
     }
 
-    try {
-      await withTimeout(
-        dispatchDiscordCommandInteraction({
-          interaction,
-          prompt: selectionCommand.prompt,
-          command: selectionCommand.command,
-          commandArgs: selectionCommand.args,
-          cfg: ctx.cfg,
-          discordConfig: ctx.discordConfig,
-          accountId: ctx.accountId,
-          sessionPrefix: ctx.sessionPrefix,
-          preferFollowUp: true,
-          threadBindings: ctx.threadBindings,
-          suppressReplies: true,
-        }),
-        12000,
-      );
-    } catch (error) {
-      if (error instanceof Error && error.message === "timeout") {
+    // Discord ACK is already sent via interaction.update() above.
+    // Detach the dispatch from the interaction event listener so INTERACTION_CREATE
+    // returns quickly. Error feedback and success confirmation are still delivered
+    // via followUp inside the detached promise.
+    void (async () => {
+      try {
+        await withTimeout(
+          dispatchDiscordCommandInteraction({
+            interaction,
+            prompt: selectionCommand.prompt,
+            command: selectionCommand.command,
+            commandArgs: selectionCommand.args,
+            cfg: ctx.cfg,
+            discordConfig: ctx.discordConfig,
+            accountId: ctx.accountId,
+            sessionPrefix: ctx.sessionPrefix,
+            preferFollowUp: true,
+            threadBindings: ctx.threadBindings,
+            suppressReplies: true,
+          }),
+          30_000,
+        );
+      } catch (error) {
+        const msg =
+          error instanceof Error && error.message === "timeout"
+            ? `⏳ Model change to ${resolvedModelRef} is still processing. Check /status in a few seconds.`
+            : `❌ Failed to apply ${resolvedModelRef}. Try /model ${resolvedModelRef} directly.`;
         await safeDiscordInteractionCall("model picker follow-up", () =>
           interaction.followUp({
-            ...buildDiscordModelPickerNoticePayload(
-              `⏳ Model change to ${resolvedModelRef} is still processing. Check /status in a few seconds.`,
-            ),
+            ...buildDiscordModelPickerNoticePayload(msg),
             ephemeral: true,
           }),
         );
         return;
       }
 
+      const effectiveModelRef = resolveDiscordModelPickerCurrentModel({
+        cfg: ctx.cfg,
+        route,
+        data: pickerData,
+      });
+      const persisted = effectiveModelRef === resolvedModelRef;
+
+      if (!persisted) {
+        logVerbose(
+          `discord: model picker override mismatch — expected ${resolvedModelRef} but read ${effectiveModelRef} from session key ${route.sessionKey}`,
+        );
+      }
+
+      if (persisted) {
+        await recordDiscordModelPickerRecentModel({
+          scope: preferenceScope,
+          modelRef: resolvedModelRef,
+          limit: 5,
+        }).catch(() => undefined);
+      }
+
       await safeDiscordInteractionCall("model picker follow-up", () =>
         interaction.followUp({
           ...buildDiscordModelPickerNoticePayload(
-            `❌ Failed to apply ${resolvedModelRef}. Try /model ${resolvedModelRef} directly.`,
+            persisted
+              ? `✅ Model set to ${resolvedModelRef}.`
+              : `⚠️ Tried to set ${resolvedModelRef}, but current model is ${effectiveModelRef}.`,
           ),
           ephemeral: true,
         }),
       );
-      return;
-    }
-
-    const effectiveModelRef = resolveDiscordModelPickerCurrentModel({
-      cfg: ctx.cfg,
-      route,
-      data: pickerData,
-    });
-    const persisted = effectiveModelRef === resolvedModelRef;
-
-    if (!persisted) {
-      logVerbose(
-        `discord: model picker override mismatch — expected ${resolvedModelRef} but read ${effectiveModelRef} from session key ${route.sessionKey}`,
-      );
-    }
-
-    if (persisted) {
-      await recordDiscordModelPickerRecentModel({
-        scope: preferenceScope,
-        modelRef: resolvedModelRef,
-        limit: 5,
-      }).catch(() => undefined);
-    }
-
-    await safeDiscordInteractionCall("model picker follow-up", () =>
-      interaction.followUp({
-        ...buildDiscordModelPickerNoticePayload(
-          persisted
-            ? `✅ Model set to ${resolvedModelRef}.`
-            : `⚠️ Tried to set ${resolvedModelRef}, but current model is ${effectiveModelRef}.`,
-        ),
-        ephemeral: true,
-      }),
-    );
+    })();
     return;
   }
 
