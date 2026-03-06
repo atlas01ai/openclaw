@@ -79,6 +79,7 @@ async function sendSignalOutbound(params: {
     accountId: params.accountId,
   });
   return await send(params.to, params.text, {
+    cfg: params.cfg,
     ...(params.mediaUrl ? { mediaUrl: params.mediaUrl } : {}),
     maxBytes,
     accountId: params.accountId ?? undefined,
