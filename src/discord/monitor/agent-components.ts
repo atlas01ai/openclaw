@@ -996,6 +996,7 @@ async function dispatchDiscordComponentEvent(params: {
           replies: [payload],
           target: deliverTarget,
           token,
+          cfg: ctx.cfg,
           accountId,
           rest: interaction.client.rest,
           runtime,

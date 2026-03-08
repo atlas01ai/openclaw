@@ -2,7 +2,7 @@ import type { RequestClient } from "@buape/carbon";
 import { resolveAgentAvatar } from "../../agents/identity-avatar.js";
 import type { ChunkMode } from "../../auto-reply/chunk.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
-import { loadConfig } from "../../config/config.js";
+import { loadConfig, type OpenClawConfig } from "../../config/config.js";
 import type { MarkdownTableMode, ReplyToMode } from "../../config/types.base.js";
 import { convertMarkdownTables } from "../../markdown/tables.js";
 import type { RuntimeEnv } from "../../runtime.js";
@@ -51,7 +51,10 @@ function resolveBoundThreadBinding(params: {
   return bindings.find((entry) => entry.threadId === targetChannelId);
 }
 
-function resolveBindingPersona(binding: DiscordThreadBindingLookupRecord | undefined): {
+function resolveBindingPersona(
+  binding: DiscordThreadBindingLookupRecord | undefined,
+  cfg?: OpenClawConfig,
+): {
   username?: string;
   avatarUrl?: string;
 } {
@@ -63,7 +66,7 @@ function resolveBindingPersona(binding: DiscordThreadBindingLookupRecord | undef
 
   let avatarUrl: string | undefined;
   try {
-    const avatar = resolveAgentAvatar(loadConfig(), binding.agentId);
+    const avatar = resolveAgentAvatar(cfg ?? loadConfig(), binding.agentId);
     if (avatar.kind === "remote") {
       avatarUrl = avatar.url;
     }
@@ -77,6 +80,7 @@ async function sendDiscordChunkWithFallback(params: {
   target: string;
   text: string;
   token: string;
+  cfg?: OpenClawConfig;
   accountId?: string;
   rest?: RequestClient;
   replyTo?: string;
@@ -96,6 +100,7 @@ async function sendDiscordChunkWithFallback(params: {
         webhookToken: binding.webhookToken,
         accountId: binding.accountId,
         threadId: binding.threadId,
+        cfg: params.cfg,
         replyTo: params.replyTo,
         username: params.username,
         avatarUrl: params.avatarUrl,
@@ -106,6 +111,7 @@ async function sendDiscordChunkWithFallback(params: {
     }
   }
   await sendMessageDiscord(params.target, text, {
+    cfg: params.cfg,
     token: params.token,
     rest: params.rest,
     accountId: params.accountId,
@@ -116,6 +122,7 @@ async function sendDiscordChunkWithFallback(params: {
 async function sendAdditionalDiscordMedia(params: {
   target: string;
   token: string;
+  cfg?: OpenClawConfig;
   rest?: RequestClient;
   accountId?: string;
   mediaUrls: string[];
@@ -124,6 +131,7 @@ async function sendAdditionalDiscordMedia(params: {
   for (const mediaUrl of params.mediaUrls) {
     const replyTo = params.resolveReplyTo();
     await sendMessageDiscord(params.target, "", {
+      cfg: params.cfg,
       token: params.token,
       rest: params.rest,
       mediaUrl,
@@ -137,6 +145,7 @@ export async function deliverDiscordReply(params: {
   replies: ReplyPayload[];
   target: string;
   token: string;
+  cfg?: OpenClawConfig;
   accountId?: string;
   rest?: RequestClient;
   runtime: RuntimeEnv;
@@ -173,7 +182,7 @@ export async function deliverDiscordReply(params: {
     sessionKey: params.sessionKey,
     target: params.target,
   });
-  const persona = resolveBindingPersona(binding);
+  const persona = resolveBindingPersona(binding, params.cfg);
   let deliveredAny = false;
   for (const payload of params.replies) {
     const mediaList = payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
@@ -202,6 +211,7 @@ export async function deliverDiscordReply(params: {
           target: params.target,
           text: chunk,
           token: params.token,
+          cfg: params.cfg,
           rest: params.rest,
           accountId: params.accountId,
           replyTo,
@@ -223,6 +233,7 @@ export async function deliverDiscordReply(params: {
     if (payload.audioAsVoice) {
       const replyTo = resolveReplyTo();
       await sendVoiceMessageDiscord(params.target, firstMedia, {
+        cfg: params.cfg,
         token: params.token,
         rest: params.rest,
         accountId: params.accountId,
@@ -234,6 +245,7 @@ export async function deliverDiscordReply(params: {
         target: params.target,
         text,
         token: params.token,
+        cfg: params.cfg,
         rest: params.rest,
         accountId: params.accountId,
         replyTo: resolveReplyTo(),
@@ -245,6 +257,7 @@ export async function deliverDiscordReply(params: {
       await sendAdditionalDiscordMedia({
         target: params.target,
         token: params.token,
+        cfg: params.cfg,
         rest: params.rest,
         accountId: params.accountId,
         mediaUrls: mediaList.slice(1),
@@ -255,6 +268,7 @@ export async function deliverDiscordReply(params: {
 
     const replyTo = resolveReplyTo();
     await sendMessageDiscord(params.target, text, {
+      cfg: params.cfg,
       token: params.token,
       rest: params.rest,
       mediaUrl: firstMedia,
@@ -265,6 +279,7 @@ export async function deliverDiscordReply(params: {
     await sendAdditionalDiscordMedia({
       target: params.target,
       token: params.token,
+      cfg: params.cfg,
       rest: params.rest,
       accountId: params.accountId,
       mediaUrls: mediaList.slice(1),
