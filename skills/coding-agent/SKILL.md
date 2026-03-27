@@ -229,6 +229,54 @@ git worktree remove /tmp/issue-99
 
 ---
 
+## Post-Build Verification (UI changes only)
+
+For tasks involving UI changes, require browser verification before marking done. Skip for pure backend/API changes.
+
+Add this to any coding task that touches UI:
+
+```
+After implementing, before marking the task complete:
+
+1. Produce a verified_pages list — explicit routes/URLs you changed or that depend on changed components.
+   If you cannot enumerate affected routes, surface this as a blocker (don't guess or skip).
+2. For each page in your verified_pages list:
+   - Navigate to it in the browser (use dev server)
+   - Test the critical user flow relevant to your change
+   - Check browser console for errors
+3. Report what you saw: "Verified [route] — [what you tested] — [pass/fail/unexpected behavior]"
+4. Fix any failures found before marking done.
+
+Do NOT mark the task complete because the code compiles and tests pass.
+Mark it complete when you have seen the feature working in the browser.
+```
+
+The `verified_pages` step is what prevents agents from taking screenshots of a loading spinner and calling it done. If the agent can't enumerate which pages are affected, that's the signal — not a bypass.
+
+## Task Spec Quality — 8 Dimensions
+
+Before spawning a coding agent, verify your task spec covers these dimensions. Missing dimensions are the #1 cause of poor subagent output.
+
+| #   | Dimension            | Quick check                                                                             |
+| --- | -------------------- | --------------------------------------------------------------------------------------- |
+| 1   | **Task**             | Precise verb? Not "help with" or "work on" — a concrete operation.                      |
+| 2   | **Target model**     | Right tier for the task? Haiku=mechanical, Sonnet=synthesis, Opus=judgment.             |
+| 3   | **Output format**    | Shape, structure, length defined? Haiku MUST have tight format lock.                    |
+| 4   | **Constraints**      | What MUST NOT happen? Scope boundaries? Anti-scope-creep for Opus?                      |
+| 5   | **Input/context**    | All needed context inline? Subagents inherit NOTHING — no files, no memory, no history. |
+| 6   | **Success criteria** | Binary definition of "done"? Not "make it good."                                        |
+| 7   | **Examples**         | Input/output pair provided? Highest-leverage addition for Haiku specs.                  |
+| 8   | **Format placement** | Output format spec at BOTH top and bottom of task? Top-only → ~40% non-compliance.      |
+
+**Key rules:**
+
+- Fill gaps before spawning — don't fix specs after a failed run
+- Opus over-engineers: always add "Only make changes directly requested"
+- For the full framework with good/bad examples: read `../prompt-master/references/dimensions.md`
+- For common spec anti-patterns: read `../prompt-master/references/anti-patterns.md`
+
+---
+
 ## ⚠️ Rules
 
 1. **Use the right execution mode per agent**:
@@ -285,6 +333,92 @@ When completely finished, run: openclaw system event --text \"Done: Built todos 
 This triggers an immediate wake event — Skippy gets pinged in seconds, not 10 minutes.
 
 ---
+
+## Long-running task patterns
+
+For multi-hour coding tasks, three patterns from Anthropic's harness research prevent the most common failure modes.
+
+### 1. Context reset (when to spawn fresh vs continue)
+
+**Problem:** As context fills, agents start wrapping up prematurely ("context anxiety"). Compaction alone doesn't fix this — the model still knows it has a long history.
+
+**Rule of thumb:** Spawn a fresh agent when:
+
+- Task has been running > ~45 min or > 50 tool calls
+- You notice the agent starting to summarize or wrap up prematurely
+- Moving to a clearly separate phase (e.g., done implementing, now testing)
+- Context compaction has already fired once
+
+Don't use in-place compaction as a substitute. Use it as a trigger: when compaction fires, that's your cue to plan a handoff.
+
+**How to do it:** Write a structured handoff artifact (see below), then spawn a fresh agent with that artifact as its only context.
+
+---
+
+### 2. Generator / Evaluator split
+
+**Problem:** Self-evaluation is unreliable. Agents grade their own work as excellent even when it's mediocre. "Be critical" prompting doesn't fix it.
+
+**Rule:** For any task where quality is subjective (UI, architecture, API design, prose), the evaluator must be a separate agent with a concrete rubric.
+
+**How:**
+
+1. **Generator** implements the task
+2. **Evaluator** (separate spawn) scores the output against a rubric you define
+3. Loop: generator iterates against evaluator feedback until approved or max rounds hit
+
+**Rubric format (not "be critical"):**
+
+```
+Evaluate against these criteria (pass/fail each):
+1. [Specific criterion 1]
+2. [Specific criterion 2]
+3. [Specific criterion 3]
+4. [Specific criterion 4]
+
+For each failure, provide specific actionable feedback (not vague).
+Overall verdict: APPROVED or NEEDS_REVISION
+```
+
+Same rubric goes to both generator (as target) and evaluator (as grading criteria).
+
+---
+
+### 3. Structured handoff artifacts
+
+When handing off between agents (context reset, phase transition, or parallel decomposition), the handoff artifact must be complete enough for a fresh agent to continue without re-reading history.
+
+**Handoff artifact format:**
+
+```markdown
+## Handoff: [Task Name]
+
+### Goal
+
+[One paragraph: what are we building and why]
+
+### Current state
+
+[What has been done. Be specific: files created/modified, key decisions made, tests passing/failing]
+
+### Next step
+
+[The exact thing the next agent should do first — not a vague description, a concrete action]
+
+### Files changed
+
+[List of key files with one-line description of what changed]
+
+### Known issues / blockers
+
+[Anything that blocked progress or needs attention]
+
+### Constraints
+
+[What must NOT be changed, scope limits, anti-patterns to avoid]
+```
+
+A handoff that says "continue implementing the feature" is not a handoff — it's scope creep waiting to happen. The next agent should be able to read the artifact and know exactly what to do without asking.
 
 ## Learnings (Jan 2026)
 
