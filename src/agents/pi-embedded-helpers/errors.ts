@@ -1002,7 +1002,10 @@ export function classifyFailoverReason(raw: string): FailoverReason | null {
     return reasonFrom402Text;
   }
   if (isPeriodicUsageLimitErrorMessage(raw)) {
-    return isBillingErrorMessage(raw) ? "billing" : "rate_limit";
+    // Periodic (daily/weekly/monthly) limits are not transient — treat as billing
+    // so profiles get a longer backoff and model fallback happens immediately
+    // instead of retrying the exhausted model dozens of times.
+    return "billing";
   }
   if (isRateLimitErrorMessage(raw)) {
     return "rate_limit";
