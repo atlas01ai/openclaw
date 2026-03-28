@@ -25,6 +25,10 @@ export function shouldPreserveTransientCooldownProbeSlot(
     reason === "format" ||
     reason === "auth" ||
     reason === "auth_permanent" ||
-    reason === "session_expired"
+    reason === "session_expired" ||
+    // Rate limits are often per-model (e.g. weekly quota exhaustion),
+    // not per-provider. Allow fallback models on the same provider
+    // to probe independently instead of being skipped.
+    reason === "rate_limit"
   );
 }

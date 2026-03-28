@@ -17,6 +17,7 @@ import { hasConfiguredModelFallbacks } from "../agent-scope.js";
 import {
   isProfileInCooldown,
   type AuthProfileFailureReason,
+  clearAuthProfileCooldown,
   markAuthProfileFailure,
   markAuthProfileGood,
   markAuthProfileUsed,
@@ -768,6 +769,7 @@ export async function runEmbeddedPiAgent(
       let autoCompactionCount = 0;
       let runLoopIterations = 0;
       let overloadFailoverAttempts = 0;
+      let consecutiveRateLimitFailures = 0;
       const maybeMarkAuthProfileFailure = async (failure: {
         profileId?: string;
         reason?: AuthProfileFailureReason | null;
@@ -1487,8 +1489,21 @@ export async function runEmbeddedPiAgent(
               }
             }
 
+            // Track consecutive rate-limit failures across profiles. When quota
+            // is exhausted (weekly/monthly cap), retrying the same model across
+            // profiles wastes time and poisons cooldowns for fallback models
+            // sharing the same provider auth pool.
+            if (assistantFailoverReason === "rate_limit") {
+              consecutiveRateLimitFailures += 1;
+            } else {
+              consecutiveRateLimitFailures = 0;
+            }
+
             const rotated = await advanceAuthProfile();
-            if (rotated) {
+            // Force model fallback after 2 consecutive rate-limit profile
+            // rotations — persistent quota limits won't be solved by switching
+            // profiles within the same provider.
+            if (rotated && !(assistantFailoverReason === "rate_limit" && consecutiveRateLimitFailures >= 2 && fallbackConfigured)) {
               logAssistantFailoverDecision("rotate_profile");
               await maybeBackoffBeforeOverloadFailover(assistantFailoverReason);
               continue;
@@ -1522,6 +1537,22 @@ export async function runEmbeddedPiAgent(
               const status =
                 resolveFailoverStatus(assistantFailoverReason ?? "unknown") ??
                 (isTimeoutErrorMessage(message) ? 408 : undefined);
+              // Clear auth profile cooldowns before model fallback so the
+              // next model (e.g. opus after sonnet quota exhaustion) can use
+              // the same provider's profiles. Without this, sonnet's rate-limit
+              // retries poison the cooldown state and block all fallback models
+              // on the same provider.
+              if (assistantFailoverReason === "rate_limit") {
+                for (const pid of profileCandidates) {
+                  if (pid && isProfileInCooldown(authStore, pid)) {
+                    await clearAuthProfileCooldown({
+                      store: authStore,
+                      profileId: pid,
+                      agentDir: params.agentDir,
+                    });
+                  }
+                }
+              }
               logAssistantFailoverDecision("fallback_model", { status });
               throw new FailoverError(message, {
                 reason: assistantFailoverReason ?? "unknown",
