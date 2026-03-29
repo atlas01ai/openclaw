@@ -14,6 +14,7 @@ import { hasConfiguredModelFallbacks } from "../agent-scope.js";
 import {
   type AuthProfileFailureReason,
   clearAuthProfileCooldown,
+  isProfileInCooldown,
   markAuthProfileFailure,
   markAuthProfileGood,
   markAuthProfileUsed,
@@ -1201,7 +1202,14 @@ export async function runEmbeddedPiAgent(
             // Force model fallback after 2 consecutive rate-limit profile
             // rotations — persistent quota limits won't be solved by switching
             // profiles within the same provider.
-            if (rotated && !(assistantFailoverReason === "rate_limit" && consecutiveRateLimitFailures >= 2 && fallbackConfigured)) {
+            if (
+              rotated &&
+              !(
+                assistantFailoverReason === "rate_limit" &&
+                consecutiveRateLimitFailures >= 2 &&
+                fallbackConfigured
+              )
+            ) {
               logAssistantFailoverDecision("rotate_profile");
               await maybeBackoffBeforeOverloadFailover(assistantFailoverReason);
               continue;
