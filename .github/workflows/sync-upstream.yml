@@ -31,10 +31,15 @@ jobs:
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
+          # Add upstream remote idempotently
+          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git 2>/dev/null || git remote set-url upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
       
       - name: Fetch upstream tags
-        run: git fetch upstream --tags
+        run: |
+          # Fetch tags AND the commits they point to
+          git fetch upstream --unshallow --tags --no-recurse-submodules
+          # Ensure we have the upstream remote refs for checkout
+          git fetch upstream --no-tags
       
       - name: Determine versions to sync
         id: versions
@@ -59,23 +64,37 @@ jobs:
         run: |
           patches_dir=".github/patches"
           
-          for version in ${{ steps.versions.outputs.versions }}; do
+          # Read versions into array to avoid word-splitting
+          IFS=' ' read -ra VERSIONS <<< "${{ steps.versions.outputs.versions }}"
+          
+          for version in "${VERSIONS[@]}"; do
             echo "Processing $version..."
             
-            # Create tracking branch
-            git checkout -b "upstream/$version" "$version" || continue
+            # Create tracking branch from upstream tag
+            if ! git checkout -b "upstream/$version" "$version" 2>/dev/null; then
+              echo "⚠️ Failed to checkout $version, skipping..."
+              continue
+            fi
             
-            # Apply patches
+            # Apply patches with nullglob to handle missing files
             failed_patches=""
-            for patch in $patches_dir/*.patch; do
-              echo "Applying $(basename $patch)..."
-              if ! git am --3way "$patch" 2>/dev/null; then
-                echo "Failed to apply $(basename $patch)"
-                git am --abort 2>/dev/null || true
-                failed_patches="$failed_patches $(basename $patch)"
-                break  # Stop applying further patches
-              fi
-            done
+            shopt -s nullglob
+            patches=("$patches_dir"/*.patch)
+            shopt -u nullglob
+            
+            if [ ${#patches[@]} -eq 0 ]; then
+              echo "No patches found in $patches_dir"
+            else
+              for patch in "${patches[@]}"; do
+                echo "Applying $(basename "$patch")..."
+                if ! git am --3way "$patch" 2>/dev/null; then
+                  echo "Failed to apply $(basename "$patch")"
+                  git am --abort 2>/dev/null || true
+                  failed_patches="$failed_patches $(basename "$patch")"
+                  break  # Stop applying further patches
+                fi
+              done
+            fi
             
             if [ -z "$failed_patches" ]; then
               # Validate
