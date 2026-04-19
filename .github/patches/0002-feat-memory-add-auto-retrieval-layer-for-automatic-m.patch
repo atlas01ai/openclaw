@@ -1,0 +1,425 @@
+From c80ae471f8fc8f3a03a339ad3deb1b3cb812dab3 Mon Sep 17 00:00:00 2001
+From: Claw <claw@atlasclaw-01>
+Date: Wed, 4 Feb 2026 02:33:56 +0000
+Subject: [PATCH 2/8] feat(memory): add auto-retrieval layer for automatic
+ memory injection
+
+This adds a new feature that automatically retrieves relevant memories
+based on the incoming message and injects them into the system prompt
+before each agent turn.
+
+Key changes:
+- New src/memory/auto-retrieval.ts module with:
+  - retrieveRelevantMemories() - semantic search on current message
+  - formatRetrievedMemories() - formats results for system prompt
+  - resolveAutoRetrievalConfig() - config resolution with defaults
+  - Smart skip logic for commands, heartbeats, short messages
+
+- Config schema (agents.defaults.memorySearch.autoRetrieval):
+  - enabled: boolean (default: false until explicitly enabled)
+  - maxTokens: number (default: 800)
+  - maxResults: number (default: 5)
+  - minScore: number (default: 0.25)
+
+- System prompt integration:
+  - New 'autoRetrievedMemory' param flows through prompt builders
+  - Injected as '## Recalled Memories' section before Project Context
+
+- Agent runner hook:
+  - Calls auto-retrieval before buildEmbeddedSystemPrompt
+  - Graceful degradation if retrieval fails
+  - Only runs for 'full' prompt mode (not subagents)
+
+The goal: Memory should come to me, not just be available if I look.
+---
+ src/agents/pi-embedded-runner/run/attempt.ts  |  26 ++
+ .../pi-embedded-runner/system-prompt.ts       |   3 +
+ src/agents/system-prompt.ts                   |   7 +
+ src/config/types.tools.ts                     |  11 +
+ src/memory/auto-retrieval.ts                  | 255 ++++++++++++++++++
+ 5 files changed, 302 insertions(+)
+ create mode 100644 src/memory/auto-retrieval.ts
+
+diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
+index 9406afae9..54edc37e2 100644
+--- a/src/agents/pi-embedded-runner/run/attempt.ts
++++ b/src/agents/pi-embedded-runner/run/attempt.ts
+@@ -13,6 +13,11 @@ import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
+ import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
+ import { getMachineDisplayName } from "../../../infra/machine-name.js";
+ import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
++import {
++  formatRetrievedMemories,
++  resolveAutoRetrievalConfig,
++  retrieveRelevantMemories,
++} from "../../../memory/auto-retrieval.js";
+ import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
+ import type {
+   PluginHookAgentContext,
+@@ -511,6 +516,26 @@ export async function runEmbeddedAttempt(
+     const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
+     const ownerDisplay = resolveOwnerDisplaySetting(params.config);
+ 
++    // Auto-retrieve relevant memories for the current message
++    let autoRetrievedMemory: string | undefined;
++    if (params.config && promptMode === "full") {
++      const autoRetrievalConfig = resolveAutoRetrievalConfig(params.config, sessionAgentId);
++      if (autoRetrievalConfig?.enabled) {
++        try {
++          const retrieval = await retrieveRelevantMemories({
++            cfg: params.config,
++            agentId: sessionAgentId,
++            message: params.prompt,
++            sessionKey: params.sessionKey,
++          });
++          autoRetrievedMemory = formatRetrievedMemories(retrieval) ?? undefined;
++        } catch (err) {
++          // Graceful degradation: continue without auto-retrieved memories
++          log.debug(`auto-retrieval failed: ${describeUnknownError(err)}`);
++        }
++      }
++    }
++
+     const appendPrompt = buildEmbeddedSystemPrompt({
+       workspaceDir: effectiveWorkspace,
+       defaultThinkLevel: params.thinkLevel,
+@@ -539,6 +564,7 @@ export async function runEmbeddedAttempt(
+       userTimeFormat,
+       contextFiles,
+       memoryCitationsMode: params.config?.memory?.citations,
++      autoRetrievedMemory,
+     });
+     const systemPromptReport = buildSystemPromptReport({
+       source: "run",
+diff --git a/src/agents/pi-embedded-runner/system-prompt.ts b/src/agents/pi-embedded-runner/system-prompt.ts
+index 67df44936..8b3197a2c 100644
+--- a/src/agents/pi-embedded-runner/system-prompt.ts
++++ b/src/agents/pi-embedded-runner/system-prompt.ts
+@@ -50,6 +50,8 @@ export function buildEmbeddedSystemPrompt(params: {
+   userTimeFormat?: ResolvedTimeFormat;
+   contextFiles?: EmbeddedContextFile[];
+   memoryCitationsMode?: MemoryCitationsMode;
++  /** Auto-retrieved memories to inject before Project Context. */
++  autoRetrievedMemory?: string;
+ }): string {
+   return buildAgentSystemPrompt({
+     workspaceDir: params.workspaceDir,
+@@ -78,6 +80,7 @@ export function buildEmbeddedSystemPrompt(params: {
+     userTimeFormat: params.userTimeFormat,
+     contextFiles: params.contextFiles,
+     memoryCitationsMode: params.memoryCitationsMode,
++    autoRetrievedMemory: params.autoRetrievedMemory,
+   });
+ }
+ 
+diff --git a/src/agents/system-prompt.ts b/src/agents/system-prompt.ts
+index d052daf5f..1a83521dd 100644
+--- a/src/agents/system-prompt.ts
++++ b/src/agents/system-prompt.ts
+@@ -230,6 +230,8 @@ export function buildAgentSystemPrompt(params: {
+     channel: string;
+   };
+   memoryCitationsMode?: MemoryCitationsMode;
++  /** Auto-retrieved memories to inject before Project Context. */
++  autoRetrievedMemory?: string;
+ }) {
+   const coreToolSummaries: Record<string, string> = {
+     read: "Read file contents",
+@@ -585,6 +587,11 @@ export function buildAgentSystemPrompt(params: {
+     lines.push("## Reasoning Format", reasoningHint, "");
+   }
+ 
++  // Inject auto-retrieved memories before Project Context
++  if (params.autoRetrievedMemory?.trim()) {
++    lines.push(params.autoRetrievedMemory.trim(), "");
++  }
++
+   const contextFiles = params.contextFiles ?? [];
+   const validContextFiles = contextFiles.filter(
+     (file) => typeof file.path === "string" && file.path.trim().length > 0,
+diff --git a/src/config/types.tools.ts b/src/config/types.tools.ts
+index 492282f23..bb164330f 100644
+--- a/src/config/types.tools.ts
++++ b/src/config/types.tools.ts
+@@ -415,6 +415,17 @@ export type MemorySearchConfig = {
+     /** Optional cap on cached embeddings (best-effort). */
+     maxEntries?: number;
+   };
++  /** Auto-retrieval configuration: automatically inject relevant memories into system prompt. */
++  autoRetrieval?: {
++    /** Enable auto-retrieval (default: false until explicitly enabled). */
++    enabled?: boolean;
++    /** Maximum tokens for auto-retrieved context (default: 800). */
++    maxTokens?: number;
++    /** Maximum number of snippets to include (default: 5). */
++    maxResults?: number;
++    /** Minimum similarity score for inclusion (default: 0.25). */
++    minScore?: number;
++  };
+ };
+ 
+ export type ToolsConfig = {
+diff --git a/src/memory/auto-retrieval.ts b/src/memory/auto-retrieval.ts
+new file mode 100644
+index 000000000..aee4760b8
+--- /dev/null
++++ b/src/memory/auto-retrieval.ts
+@@ -0,0 +1,255 @@
++/**
++ * Auto-Retrieval Layer for Memory
++ *
++ * This module provides automatic memory retrieval that injects relevant
++ * context into the system prompt before each agent turn.
++ *
++ * The goal: Memory should come to me, not just be available if I look.
++ */
++
++import type { OpenClawConfig } from "../config/config.js";
++import type { MemorySearchResult } from "./types.js";
++import { createSubsystemLogger } from "../logging/subsystem.js";
++import { getMemorySearchManager } from "./index.js";
++
++const log = createSubsystemLogger("memory:auto-retrieval");
++
++export interface AutoRetrievalConfig {
++  enabled: boolean;
++  maxTokens: number;
++  maxResults: number;
++  minScore: number;
++}
++
++export interface AutoRetrievalResult {
++  snippets: MemorySearchResult[];
++  totalTokens: number;
++  query: string;
++  skipped?: string;
++}
++
++const DEFAULT_CONFIG: AutoRetrievalConfig = {
++  enabled: true,
++  maxTokens: 800,
++  maxResults: 5,
++  minScore: 0.25,
++};
++
++/**
++ * Estimate tokens for a snippet (rough: ~4 chars per token)
++ */
++function estimateTokens(text: string): number {
++  return Math.ceil(text.length / 4);
++}
++
++/**
++ * Extract the most relevant query from the user message.
++ * For now, just use the full message. Future: could extract key phrases.
++ */
++function extractQuery(message: string): string {
++  // Trim and limit query length to avoid embedding API issues
++  const trimmed = message.trim();
++  if (trimmed.length > 1000) {
++    return trimmed.slice(0, 1000);
++  }
++  return trimmed;
++}
++
++/**
++ * Check if auto-retrieval should be skipped for this message.
++ * Skip for very short messages, commands, or heartbeats.
++ */
++function shouldSkipRetrieval(message: string): string | null {
++  const trimmed = message.trim();
++
++  // Skip empty or very short messages
++  if (trimmed.length < 10) {
++    return "message too short";
++  }
++
++  // Skip slash commands
++  if (trimmed.startsWith("/")) {
++    return "slash command";
++  }
++
++  // Skip heartbeat polls
++  if (trimmed.toLowerCase().includes("heartbeat") && trimmed.includes("HEARTBEAT.md")) {
++    return "heartbeat poll";
++  }
++
++  // Skip if message is just an emoji or reaction
++  if (/^[\p{Emoji}\s]+$/u.test(trimmed) && trimmed.length < 20) {
++    return "emoji only";
++  }
++
++  return null;
++}
++
++/**
++ * Resolve auto-retrieval config from OpenClaw config.
++ */
++export function resolveAutoRetrievalConfig(
++  cfg: OpenClawConfig | undefined,
++  agentId: string,
++): AutoRetrievalConfig | null {
++  if (!cfg) {
++    return null;
++  }
++
++  const agentConfig = cfg.agents?.items?.[agentId];
++  const defaults = cfg.agents?.defaults;
++
++  // Check if memory search is enabled (required for auto-retrieval)
++  const memorySearchEnabled =
++    agentConfig?.memorySearch?.enabled ?? defaults?.memorySearch?.enabled ?? false;
++
++  if (!memorySearchEnabled) {
++    return null;
++  }
++
++  // Get auto-retrieval specific config
++  const autoRetrieval =
++    agentConfig?.memorySearch?.autoRetrieval ?? defaults?.memorySearch?.autoRetrieval;
++
++  if (autoRetrieval?.enabled === false) {
++    return null;
++  }
++
++  return {
++    enabled: autoRetrieval?.enabled ?? DEFAULT_CONFIG.enabled,
++    maxTokens: autoRetrieval?.maxTokens ?? DEFAULT_CONFIG.maxTokens,
++    maxResults: autoRetrieval?.maxResults ?? DEFAULT_CONFIG.maxResults,
++    minScore: autoRetrieval?.minScore ?? DEFAULT_CONFIG.minScore,
++  };
++}
++
++/**
++ * Retrieve relevant memories for the incoming message.
++ * This is the main entry point for auto-retrieval.
++ */
++export async function retrieveRelevantMemories(params: {
++  cfg: OpenClawConfig;
++  agentId: string;
++  message: string;
++  sessionKey?: string;
++  config?: Partial<AutoRetrievalConfig>;
++}): Promise<AutoRetrievalResult> {
++  const { cfg, agentId, message, sessionKey } = params;
++
++  // Resolve config
++  const resolvedConfig = resolveAutoRetrievalConfig(cfg, agentId);
++  const config = {
++    ...DEFAULT_CONFIG,
++    ...resolvedConfig,
++    ...params.config,
++  };
++
++  const query = extractQuery(message);
++
++  // Check if we should skip
++  const skipReason = shouldSkipRetrieval(message);
++  if (skipReason) {
++    log.debug(`auto-retrieval skipped: ${skipReason}`);
++    return {
++      snippets: [],
++      totalTokens: 0,
++      query,
++      skipped: skipReason,
++    };
++  }
++
++  // Get memory search manager
++  const { manager, error } = await getMemorySearchManager({ cfg, agentId });
++  if (!manager) {
++    log.debug(`auto-retrieval unavailable: ${error ?? "no manager"}`);
++    return {
++      snippets: [],
++      totalTokens: 0,
++      query,
++      skipped: error ?? "memory search unavailable",
++    };
++  }
++
++  try {
++    // Run semantic search
++    const results = await manager.search(query, {
++      maxResults: config.maxResults * 2, // Get extra, then filter by tokens
++      minScore: config.minScore,
++      sessionKey,
++    });
++
++    // Filter and trim to token budget
++    const snippets: MemorySearchResult[] = [];
++    let totalTokens = 0;
++
++    for (const result of results) {
++      const snippetTokens = estimateTokens(result.snippet);
++      if (totalTokens + snippetTokens > config.maxTokens) {
++        // Stop if we'd exceed budget
++        break;
++      }
++      snippets.push(result);
++      totalTokens += snippetTokens;
++
++      if (snippets.length >= config.maxResults) {
++        break;
++      }
++    }
++
++    log.debug(
++      `auto-retrieval: ${snippets.length} snippets, ~${totalTokens} tokens for query: "${query.slice(0, 50)}..."`,
++    );
++
++    return {
++      snippets,
++      totalTokens,
++      query,
++    };
++  } catch (err) {
++    const errorMessage = err instanceof Error ? err.message : String(err);
++    log.warn(`auto-retrieval failed: ${errorMessage}`);
++    return {
++      snippets: [],
++      totalTokens: 0,
++      query,
++      skipped: `error: ${errorMessage}`,
++    };
++  }
++}
++
++/**
++ * Format retrieved memories for injection into system prompt.
++ */
++export function formatRetrievedMemories(result: AutoRetrievalResult): string | null {
++  if (result.snippets.length === 0) {
++    return null;
++  }
++
++  const lines: string[] = [
++    "## Recalled Memories",
++    "",
++    "The following memories were automatically retrieved based on the current conversation:",
++    "",
++  ];
++
++  for (const snippet of result.snippets) {
++    const source = snippet.path;
++    const lineInfo =
++      snippet.startLine && snippet.endLine
++        ? `:${snippet.startLine}-${snippet.endLine}`
++        : snippet.startLine
++          ? `:${snippet.startLine}`
++          : "";
++    const score = snippet.score.toFixed(2);
++
++    lines.push(`### ${source}${lineInfo} (relevance: ${score})`);
++    lines.push("");
++    lines.push(snippet.snippet.trim());
++    lines.push("");
++  }
++
++  lines.push("*These memories surfaced automatically. Use memory_search for deeper exploration.*");
++  lines.push("");
++
++  return lines.join("\n");
++}
+-- 
+2.43.0
+

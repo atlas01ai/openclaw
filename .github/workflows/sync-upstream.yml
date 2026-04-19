@@ -1,0 +1,104 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Specific version to sync (e.g., v2026.4.10)'
+        required: false
+        type: string
+
+env:
+  UPSTREAM_REPO: openclaw/openclaw
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
+      
+      - name: Fetch upstream tags
+        run: git fetch upstream --tags
+      
+      - name: Determine versions to sync
+        id: versions
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "versions=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Get all upstream tags not yet tracked
+            upstream_tags=$(git ls-remote --tags upstream | grep -o 'v2026\.[0-9]\+\.[0-9]\+$' | sort -V)
+            tracked_branches=$(git branch -r | grep 'origin/upstream/' | sed 's|origin/upstream/||')
+            new_versions=""
+            for tag in $upstream_tags; do
+              if ! echo "$tracked_branches" | grep -q "^${tag}$"; then
+                new_versions="$new_versions $tag"
+              fi
+            done
+            echo "versions=$(echo $new_versions | xargs)" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Sync each version
+        if: steps.versions.outputs.versions != ''
+        run: |
+          patches_dir=".github/patches"
+          
+          for version in ${{ steps.versions.outputs.versions }}; do
+            echo "Processing $version..."
+            
+            # Create tracking branch
+            git checkout -b "upstream/$version" "$version" || continue
+            
+            # Apply patches
+            failed_patches=""
+            for patch in $patches_dir/*.patch; do
+              echo "Applying $(basename $patch)..."
+              if ! git am --3way "$patch" 2>/dev/null; then
+                echo "Failed to apply $(basename $patch)"
+                git am --abort 2>/dev/null || true
+                failed_patches="$failed_patches $(basename $patch)"
+                break  # Stop applying further patches
+              fi
+            done
+            
+            if [ -z "$failed_patches" ]; then
+              # Validate
+              if [ -f ".github/scripts/validate.sh" ]; then
+                bash .github/scripts/validate.sh || echo "Validation failed but continuing"
+              fi
+              
+              # Push to fork
+              git push origin "upstream/$version"
+              echo "✓ Successfully synced $version"
+            else
+              echo "✗ Failed to sync $version due to patch failures:$failed_patches"
+              
+              # Create issue for manual intervention
+              gh issue create \
+                --title "Sync failed for $version" \
+                --body "Failed to apply patches:$failed_patches\n\nVersion: $version\nWorkflow: ${{ github.run_id }}" \
+                --label "sync-failure"
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Report status
+        if: steps.versions.outputs.versions == ''
+        run: echo "No new versions to sync"

@@ -1,0 +1,45 @@
+From 87d5db2e118cb2d4d73bdfb751fdf625ad38e9cf Mon Sep 17 00:00:00 2001
+From: Claw <claw@atlasclaw-01>
+Date: Tue, 24 Feb 2026 05:57:38 +0000
+Subject: [PATCH 8/8] fix(thinking): restrict tool-call-ID streamFn
+ sanitization to strict9 (Mistral) only
+
+v2026.2.22 added a per-request streamFn wrapper that sanitizes tool call IDs for
+all providers with sanitizeToolCallIds=true, including Anthropic (strict mode).
+Anthropic generates IDs like toolu_01AbCd (with underscores). The strict sanitizer
+renames these to tooluXX, which invalidates extended thinking block signatures
+because Anthropic signs over the full message content including tool call IDs.
+
+Result: every turn that produces thinking blocks + tool calls fails with:
+  'thinking or redacted_thinking blocks in the latest assistant message cannot be modified'
+
+Fix: restrict the streamFn wrapper to strict9 mode (Mistral) only, where it is
+actually required. The one-time sanitizeSessionHistory at session load is unchanged.
+Anthropic does not require alphanumeric-only tool call IDs.
+---
+ src/agents/pi-embedded-runner/run/attempt.ts | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
+index 54edc37e2..960f8d8ce 100644
+--- a/src/agents/pi-embedded-runner/run/attempt.ts
++++ b/src/agents/pi-embedded-runner/run/attempt.ts
+@@ -806,7 +806,14 @@ export async function runEmbeddedAttempt(
+       // historical messages at attempt start, but the agent loop's internal tool call →
+       // tool result cycles bypass that path. Wrap streamFn so every outbound request
+       // sees sanitized tool call IDs.
+-      if (transcriptPolicy.sanitizeToolCallIds && transcriptPolicy.toolCallIdMode) {
++      //
++      // Custom fork patch: restrict per-request streamFn sanitization to strict9 mode
++      // (Mistral) only. Applying it to Anthropic (strict mode) invalidates extended
++      // thinking block signatures — Anthropic signs over the full message content
++      // including tool call IDs. Changing toolu_XX → tooluXX on every request corrupts
++      // the signature, causing "thinking blocks cannot be modified" API rejections.
++      // The one-time sanitizeSessionHistory call at session load is unaffected.
++      if (transcriptPolicy.sanitizeToolCallIds && transcriptPolicy.toolCallIdMode === "strict9") {
+         const inner = activeSession.agent.streamFn;
+         const mode = transcriptPolicy.toolCallIdMode;
+         activeSession.agent.streamFn = (model, context, options) => {
+-- 
+2.43.0
+

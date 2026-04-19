@@ -1,0 +1,33 @@
+From deecc35dc39d8203d3799bd8199eb7c1992f51aa Mon Sep 17 00:00:00 2001
+From: Claw <claw@atlasclaw-01>
+Date: Wed, 4 Feb 2026 02:56:07 +0000
+Subject: [PATCH 5/8] fix(config): add autoRetrieval to Zod validation schema
+
+Without this, config.patch rejects autoRetrieval as unknown field.
+---
+ src/config/zod-schema.agent-runtime.ts | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
+index 5147ba576..52c6d592c 100644
+--- a/src/config/zod-schema.agent-runtime.ts
++++ b/src/config/zod-schema.agent-runtime.ts
+@@ -635,6 +635,15 @@ export const MemorySearchSchema = z
+       })
+       .strict()
+       .optional(),
++    autoRetrieval: z
++      .object({
++        enabled: z.boolean().optional(),
++        maxTokens: z.number().int().positive().optional(),
++        maxResults: z.number().int().positive().optional(),
++        minScore: z.number().min(0).max(1).optional(),
++      })
++      .strict()
++      .optional(),
+   })
+   .strict()
+   .optional();
+-- 
+2.43.0
+
