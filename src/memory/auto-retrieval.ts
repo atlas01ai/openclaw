@@ -16,9 +16,9 @@
  */
 
 import type { OpenClawConfig } from "../config/config.js";
-import type { MemorySearchResult } from "./types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { getMemorySearchManager } from "./index.js";
+import type { MemorySearchResult } from "../plugin-sdk/memory-core.js";
+import { getMemorySearchManager } from "../plugin-sdk/memory-core.js";
 
 const log = createSubsystemLogger("memory:auto-retrieval");
 

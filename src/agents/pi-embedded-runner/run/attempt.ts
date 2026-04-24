@@ -14,17 +14,6 @@ import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summar
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
 import {
-  isOllamaCompatProvider,
-  resolveOllamaCompatNumCtxEnabled,
-  shouldInjectOllamaCompatNumCtx,
-  wrapOllamaCompatNumCtx,
-} from "../../../plugin-sdk/ollama.js";
-import { resolveSignalReactionLevel } from "../../../plugin-sdk/signal.js";
-import {
-  resolveTelegramInlineButtonsScope,
-  resolveTelegramReactionLevel,
-} from "../../../plugin-sdk/telegram-runtime.js";
-import {
   formatRetrievedMemories,
   resolveAutoRetrievalConfig,
   retrieveRelevantMemories,
@@ -888,7 +877,7 @@ export async function runEmbeddedAttempt(
           autoRetrievedMemory = formatRetrievedMemories(retrieval) ?? undefined;
         } catch (err) {
           // Graceful degradation: continue without auto-retrieved memories
-          log.debug(`auto-retrieval failed: ${describeUnknownError(err)}`);
+          log.debug(`auto-retrieval failed: ${formatErrorMessage(err)}`);
         }
       }
     }
