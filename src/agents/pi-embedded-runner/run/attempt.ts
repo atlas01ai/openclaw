@@ -148,6 +148,11 @@ import {
   resolveSubagentCapabilityStore,
 } from "../../subagent-capabilities.js";
 import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
+import {
+  formatRetrievedMemories,
+  resolveAutoRetrievalConfig,
+  retrieveRelevantMemories,
+} from "../../../memory/auto-retrieval.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { resolveAgentTimeoutMs } from "../../timeout.js";
@@ -1185,6 +1190,26 @@ export async function runEmbeddedAttempt(
         context: promptContributionContext,
       });
 
+    // Auto-retrieve relevant memories for the current message
+    let autoRetrievedMemory: string | undefined;
+    if (params.config && effectivePromptMode === "full") {
+      const autoRetrievalConfig = resolveAutoRetrievalConfig(params.config, sessionAgentId);
+      if (autoRetrievalConfig?.enabled) {
+        try {
+          const retrieval = await retrieveRelevantMemories({
+            cfg: params.config,
+            agentId: sessionAgentId,
+            message: params.prompt,
+            sessionKey: params.sessionKey,
+          });
+          autoRetrievedMemory = formatRetrievedMemories(retrieval) ?? undefined;
+        } catch (err) {
+          // Graceful degradation: continue without auto-retrieved memories
+          log.debug(`auto-retrieval failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
     const builtAppendPrompt =
       resolveSystemPromptOverride({
         config: params.config,
@@ -1226,6 +1251,7 @@ export async function runEmbeddedAttempt(
         includeMemorySection: !activeContextEngine || activeContextEngine.info.id === "legacy",
         memoryCitationsMode: params.config?.memory?.citations,
         promptContribution,
+        autoRetrievedMemory,
       });
     const appendPrompt = isRawModelRun
       ? ""
