@@ -496,6 +496,19 @@ export type MemorySearchConfig = {
     /** Optional cap on cached embeddings (best-effort). */
     maxEntries?: number;
   };
+  /** Auto-retrieve relevant memories based on conversation context. */
+  autoRetrieval?: {
+    /** Enable automatic memory retrieval (default: false). */
+    enabled?: boolean;
+    /** Maximum number of memories to retrieve (default: 3). */
+    maxResults?: number;
+    /** Minimum similarity score threshold 0-1 (default: 0.5). */
+    minScore?: number;
+    /** Maximum characters of retrieved content to include (default: 2000). */
+    maxChars?: number;
+    /** Query source for auto-retrieval (default: "last_user"). */
+    queryMode?: "last_user" | "turn_context";
+  };
 };
 
 export type ToolsConfig = {

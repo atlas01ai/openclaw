@@ -22,6 +22,13 @@ import { formatErrorMessage } from "../../../infra/errors.js";
 import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summary.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
+import {
+  buildAutoRetrievalQuery,
+  formatRetrievedMemories,
+  resolveAutoRetrievalConfig,
+  retrieveRelevantMemories,
+} from "../../../memory/auto-retrieval.js";
+import { getActiveMemorySearchManager } from "../../../plugin-sdk/memory-host-search.js";
 import { listRegisteredPluginAgentPromptGuidance } from "../../../plugins/command-registry-state.js";
 import { buildAgentHookContextChannelFields } from "../../../plugins/hook-agent-context.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
@@ -1284,6 +1291,49 @@ export async function runEmbeddedAttempt(
         context: promptContributionContext,
       });
 
+    // Resolve auto-retrieval configuration
+    const memorySearchConfig = params.config?.agents?.defaults?.memorySearch;
+    const autoRetrievalConfig = resolveAutoRetrievalConfig(memorySearchConfig);
+
+    // Perform auto-retrieval if enabled
+    let autoRetrievedMemory: string | undefined;
+    if (autoRetrievalConfig.enabled) {
+      const searchManagerResult = await getActiveMemorySearchManager({
+        cfg: params.config,
+        agentId: sessionAgentId,
+        purpose: "default",
+      });
+
+      if (searchManagerResult.manager) {
+        // Build query from conversation context
+        const lastUserMessage =
+          params.messages.findLast((m) => m.role === "user")?.content?.toString() ?? "";
+        const query = buildAutoRetrievalQuery({
+          queryMode: autoRetrievalConfig.queryMode,
+          lastUserMessage,
+        });
+
+        // Retrieve relevant memories
+        const memories = await retrieveRelevantMemories({
+          searchManager: searchManagerResult.manager,
+          query,
+          maxResults: autoRetrievalConfig.maxResults,
+          minScore: autoRetrievalConfig.minScore,
+          sessionKey: params.sessionKey,
+        });
+
+        // Format for system prompt
+        const formatted = formatRetrievedMemories({
+          memories,
+          maxChars: autoRetrievalConfig.maxChars,
+        });
+
+        if (formatted.text) {
+          autoRetrievedMemory = formatted.text;
+        }
+      }
+    }
+
     const builtAppendPrompt =
       resolveSystemPromptOverride({
         config: params.config,
@@ -1324,6 +1374,7 @@ export async function runEmbeddedAttempt(
         contextFiles,
         includeMemorySection: !activeContextEngine || activeContextEngine.info.id === "legacy",
         memoryCitationsMode: params.config?.memory?.citations,
+        autoRetrievedMemory,
         promptContribution,
       });
     const appendPrompt = isRawModelRun

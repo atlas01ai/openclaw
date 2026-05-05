@@ -543,6 +543,8 @@ export function buildAgentSystemPrompt(params: {
   };
   includeMemorySection?: boolean;
   memoryCitationsMode?: MemoryCitationsMode;
+  /** Auto-retrieved memories based on conversation context. */
+  autoRetrievedMemory?: string;
   promptContribution?: ProviderSystemPromptContribution;
 }) {
   const acpEnabled = params.acpEnabled === true;
@@ -897,6 +899,8 @@ export function buildAgentSystemPrompt(params: {
       "",
       ...skillsSection,
       ...memorySection,
+      params.autoRetrievedMemory && !isMinimal ? params.autoRetrievedMemory : "",
+      params.autoRetrievedMemory && !isMinimal ? "" : "",
       hasGateway && !isMinimal ? "## OpenClaw Self-Update" : "",
       hasGateway && !isMinimal
         ? [

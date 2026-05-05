@@ -780,6 +780,16 @@ export const MemorySearchSchema = z
       })
       .strict()
       .optional(),
+    autoRetrieval: z
+      .object({
+        enabled: z.boolean().optional(),
+        maxResults: z.number().int().positive().optional(),
+        minScore: z.number().min(0).max(1).optional(),
+        maxChars: z.number().int().positive().optional(),
+        queryMode: z.enum(["last_user", "turn_context"]).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();

@@ -64,6 +64,8 @@ export function buildEmbeddedSystemPrompt(params: {
   contextFiles?: EmbeddedContextFile[];
   includeMemorySection?: boolean;
   memoryCitationsMode?: MemoryCitationsMode;
+  /** Auto-retrieved memories based on conversation context. */
+  autoRetrievedMemory?: string;
   promptContribution?: ProviderSystemPromptContribution;
 }): string {
   return buildAgentSystemPrompt({
@@ -99,6 +101,7 @@ export function buildEmbeddedSystemPrompt(params: {
     contextFiles: params.contextFiles,
     includeMemorySection: params.includeMemorySection,
     memoryCitationsMode: params.memoryCitationsMode,
+    autoRetrievedMemory: params.autoRetrievedMemory,
     promptContribution: params.promptContribution,
   });
 }
