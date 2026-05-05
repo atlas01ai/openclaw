@@ -257,6 +257,9 @@ export function buildOpenClawChromeLaunchArgs(params: {
     "--disable-session-crashed-bubble",
     "--hide-crash-restore-bubble",
     "--password-store=basic",
+    "--disable-session-restore",
+    "--disable-restore-session-state",
+    "--disable-features=SessionRestore",
   ];
 
   if (headlessMode.headless) {

@@ -5,6 +5,7 @@ import {
 import type { Page } from "playwright-core";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { type AriaSnapshotNode, formatAriaSnapshot, type RawAXNode } from "./cdp.js";
+import { closeContextIfEmpty } from "./context-cleanup.js";
 import {
   assertBrowserNavigationAllowed,
   type BrowserNavigationPolicyOptions,
@@ -410,7 +411,10 @@ export async function closePageViaPlaywright(opts: {
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
+  const context = page.context();
   await page.close();
+  // Clean up empty context to prevent resource leaks
+  await closeContextIfEmpty(context);
 }
 
 export async function pdfViaPlaywright(opts: {

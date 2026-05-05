@@ -25,6 +25,7 @@ import {
 } from "./cdp.helpers.js";
 import { AX_REF_PATTERN, normalizeCdpWsUrl } from "./cdp.js";
 import { getChromeWebSocketUrl } from "./chrome.js";
+import { closeContextIfEmpty } from "./context-cleanup.js";
 import { BrowserTabNotFoundError } from "./errors.js";
 import {
   assertBrowserNavigationAllowed,
@@ -1369,7 +1370,10 @@ export async function closePageByTargetIdViaPlaywright(opts: {
   ssrfPolicy?: SsrFPolicy;
 }): Promise<void> {
   const page = await resolvePageByTargetIdOrThrow(opts);
+  const context = page.context();
   await page.close();
+  // Clean up empty context to prevent resource leaks
+  await closeContextIfEmpty(context);
 }
 
 /**
